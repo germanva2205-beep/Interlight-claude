@@ -1,0 +1,50 @@
+name: build-android
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Всегда создаём Android-часть заново: так в ней не остаётся старых или повреждённых файлов.
+      - name: Create Android project files
+        run: |
+          rm -rf android lib/android
+          flutter create --platforms=android --org com.germanva --project-name interlight .
+
+      # Включает desugaring (с зависимостью!), minSdk 26, Health Connect и уведомления.
+      - name: Configure Android
+        run: python3 tool/patch_android.py
+
+      # flutter create кладёт демо-тест, который ссылается на несуществующий MyApp.
+      - name: Remove generated sample test
+        run: rm -rf test
+
+      - name: Get packages
+        run: flutter pub get
+
+      # Ошибки Dart находятся здесь за минуту, до долгой сборки Gradle.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
