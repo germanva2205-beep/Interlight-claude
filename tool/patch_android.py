@@ -4,7 +4,7 @@
 Запускается из корня проекта (после `flutter create`). Скрипт ПРАВИТ сгенерированные файлы,
 а не заменяет их целиком, поэтому работает и при смене шаблона Flutter.
 Что делает:
-  1. build.gradle.kts: minSdk 26, включает desugaring и добавляет его зависимость;
+  1. build.gradle.kts: minSdk 26, включает desugaring, добавляет зависимость И НАСТРАИВАЕТ JAVA 11;
   2. AndroidManifest.xml: разрешения, Health Connect, приёмники уведомлений;
   3. MainActivity.kt: FlutterFragmentActivity (нужна для Health Connect).
 Повторный запуск безопасен: уже добавленное второй раз не добавляется.
@@ -32,6 +32,13 @@ if "com.android.application" not in g:
     fail("android/app/build.gradle.kts не похож на настройки Gradle. Удалите папку android в репозитории: "
          "её пересоздаст flutter create")
 
+# --- НОВОЕ: Настраиваем Java 11 для совместимости с плагинами ---
+# Заменяем VERSION_1_8 на VERSION_11 везде
+g = re.sub(r'JavaVersion\.VERSION_1_8', 'JavaVersion.VERSION_11', g)
+# Обновляем jvmTarget на "11"
+g = re.sub(r'jvmTarget\s*=\s*"[^"]*"', 'jvmTarget = "11"', g)
+print("✅ Настроена совместимость с Java 11")
+
 # minSdk 26 нужен для Health Connect
 if re.search(r"minSdk\s*=", g):
     g = re.sub(r"minSdk\s*=\s*[^\n]+", "minSdk = 26", g)
@@ -48,7 +55,11 @@ else:
 
 # добавляем зависимость (именно её не хватало: «coreLibraryDesugaring configuration contains no dependencies»)
 if "coreLibraryDesugaring(" not in g:
-    g = g.rstrip() + "\n\ndependencies {\n    " + DESUGAR + "\n}\n"
+    # Проверяем, есть ли уже блок dependencies
+    if re.search(r'^dependencies\s*\{', g, re.MULTILINE):
+        g = re.sub(r'(dependencies\s*\{)', r'\1\n    ' + DESUGAR, g, count=1)
+    else:
+        g = g.rstrip() + "\n\ndependencies {\n    " + DESUGAR + "\n}\n"
 
 if "isCoreLibraryDesugaringEnabled = true" not in g:
     fail("не удалось включить desugaring в build.gradle.kts")
