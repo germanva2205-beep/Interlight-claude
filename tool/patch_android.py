@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Донастраивает Android-проект под InterLight."""
+"""Донастраивает Android-проект, созданный командой `flutter create`, под InterLight.
+
+Запускается из корня проекта (после `flutter create`). Скрипт ПРАВИТ сгенерированные файлы,
+а не заменяет их целиком, поэтому работает и при смене шаблона Flutter.
+Что делает:
+  1. build.gradle.kts: minSdk 26, включает desugaring и добавляет его зависимость;
+  2. AndroidManifest.xml: разрешения, Health Connect, приёмники уведомлений;
+  3. MainActivity.kt: FlutterFragmentActivity (нужна для Health Connect).
+Повторный запуск безопасен: уже добавленное второй раз не добавляется.
+"""
 import pathlib
 import re
 import sys
@@ -8,54 +17,28 @@ import xml.dom.minidom
 PACKAGE = "com.germanva.interlight"
 DESUGAR = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
 
+
 def fail(msg):
     print("ОШИБКА: " + msg)
     sys.exit(1)
-
-# ───────────────────────── 0. gradle.properties (ГЛОБАЛЬНАЯ НАСТРОЙКА) ─────────────────────────
-# Это решает проблему Inconsistent JVM Target для ВСЕХ плагинов
-props_path = pathlib.Path("android/gradle.properties")
-if props_path.exists():
-    props = props_path.read_text(encoding="utf-8")
-else:
-    props = ""
-
-# Добавляем или обновляем настройки JVM
-jvm_settings = [
-    "org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=512m",
-    "kotlin.jvm.target.validation.mode = IGNORE", # Игнорируем проверку версий (безопасно для Flutter)
-]
-
-for setting in jvm_settings:
-    key = setting.split("=")[0].strip()
-    if key not in props:
-        props += "\n" + setting
-    else:
-        # Если ключ уже есть, обновляем значение
-        props = re.sub(re.escape(key) + r".*", setting, props)
-
-props_path.write_text(props.strip() + "\n", encoding="utf-8")
-print("✅ Настроен android/gradle.properties (Global JVM Fix)")
 
 
 # ───────────────────────── 1. build.gradle.kts ─────────────────────────
 gradle_path = pathlib.Path("android/app/build.gradle.kts")
 if not gradle_path.exists():
-    fail("не найден android/app/build.gradle.kts")
-    
+    fail("не найден android/app/build.gradle.kts, сначала выполните flutter create")
 g = gradle_path.read_text(encoding="utf-8")
+if "com.android.application" not in g:
+    fail("android/app/build.gradle.kts не похож на настройки Gradle. Удалите папку android в репозитории: "
+         "её пересоздаст flutter create")
 
-# Настраиваем Java 11 локально для приложения
-g = re.sub(r'JavaVersion\.VERSION_1_8', 'JavaVersion.VERSION_11', g)
-g = re.sub(r'jvmTarget\s*=\s*"[^"]*"', 'jvmTarget = "11"', g)
-
-# minSdk 26
+# minSdk 26 нужен для Health Connect
 if re.search(r"minSdk\s*=", g):
     g = re.sub(r"minSdk\s*=\s*[^\n]+", "minSdk = 26", g)
 else:
     g = re.sub(r"(defaultConfig\s*\{)", r"\1\n        minSdk = 26", g, count=1)
 
-# Desugaring
+# включаем desugaring
 if "isCoreLibraryDesugaringEnabled" in g:
     g = re.sub(r"isCoreLibraryDesugaringEnabled\s*=\s*false", "isCoreLibraryDesugaringEnabled = true", g)
 elif re.search(r"compileOptions\s*\{", g):
@@ -63,29 +46,30 @@ elif re.search(r"compileOptions\s*\{", g):
 else:
     g = re.sub(r"(android\s*\{)", r"\1\n    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n    }", g, count=1)
 
-# Зависимость desugar
+# добавляем зависимость (именно её не хватало: «coreLibraryDesugaring configuration contains no dependencies»)
 if "coreLibraryDesugaring(" not in g:
-    if re.search(r'^dependencies\s*\{', g, re.MULTILINE):
-        g = re.sub(r'(dependencies\s*\{)', r'\1\n    ' + DESUGAR, g, count=1)
-    else:
-        g = g.rstrip() + "\n\ndependencies {\n    " + DESUGAR + "\n}\n"
+    g = g.rstrip() + "\n\ndependencies {\n    " + DESUGAR + "\n}\n"
 
-# Проверки
-if "isCoreLibraryDesugaringEnabled = true" not in g: fail("не удалось включить desugaring")
-if DESUGAR not in g: fail("не удалось добавить зависимость desugaring")
-if not re.search(r"minSdk\s*=\s*26", g): fail("не удалось выставить minSdk = 26")
-
+if "isCoreLibraryDesugaringEnabled = true" not in g:
+    fail("не удалось включить desugaring в build.gradle.kts")
+if DESUGAR not in g:
+    fail("не удалось добавить зависимость desugaring в build.gradle.kts")
+if not re.search(r"minSdk\s*=\s*26", g):
+    fail("не удалось выставить minSdk = 26")
 gradle_path.write_text(g, encoding="utf-8")
 print("OK build.gradle.kts")
 
 # ───────────────────────── 2. AndroidManifest.xml ─────────────────────────
 manifest_path = pathlib.Path("android/app/src/main/AndroidManifest.xml")
-if not manifest_path.exists(): fail("не найден AndroidManifest.xml")
+if not manifest_path.exists():
+    fail("не найден AndroidManifest.xml")
 x = manifest_path.read_text(encoding="utf-8")
 
 permissions = [
-    "android.permission.CAMERA", "android.permission.POST_NOTIFICATIONS",
-    "android.permission.RECEIVE_BOOT_COMPLETED", "android.permission.ACTIVITY_RECOGNITION",
+    "android.permission.CAMERA",
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.ACTIVITY_RECOGNITION",
     "android.permission.health.READ_STEPS",
 ]
 perm_xml = ""
@@ -95,6 +79,7 @@ for p in permissions:
 if perm_xml:
     x = re.sub(r"(<manifest[^>]*>\s*\n)", lambda m: m.group(1) + perm_xml, x, count=1)
 
+# Health Connect в <queries>
 queries_inner = (
     '        <package android:name="com.google.android.apps.healthdata"/>\n'
     "        <intent>\n"
@@ -107,6 +92,7 @@ if "com.google.android.apps.healthdata" not in x:
     else:
         x = x.replace("<application", "<queries>\n" + queries_inner + "    </queries>\n\n    <application", 1)
 
+# экран объяснения разрешений для Health Connect (внутри MainActivity)
 MARK = "interlight:health-rationale"
 _activity = re.search(r"<activity\b.*?</activity>", x, re.S)
 _has_rationale = bool(_activity and "ACTION_SHOW_PERMISSIONS_RATIONALE" in _activity.group(0))
@@ -117,13 +103,17 @@ if MARK not in x and not _has_rationale:
         f"                <!-- {MARK} -->\n"
         '                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE"/>\n'
         "            </intent-filter>\n"
-        "        </activity>", 1)
+        "        </activity>",
+        1,
+    )
 
 extra = ""
 if "ScheduledNotificationReceiver" not in x:
     extra += (
-        '        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n'
-        '        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n'
+        '        <receiver android:exported="false"\n'
+        '            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n'
+        '        <receiver android:exported="false"\n'
+        '            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n'
         "            <intent-filter>\n"
         '                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n'
         '                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n'
@@ -134,7 +124,11 @@ if "ScheduledNotificationReceiver" not in x:
     )
 if "ViewPermissionUsageActivity" not in x:
     extra += (
-        "        <activity-alias android:name=\"ViewPermissionUsageActivity\" android:exported=\"true\" android:targetActivity=\".MainActivity\" android:permission=\"android.permission.START_VIEW_PERMISSION_USAGE\">\n"
+        "        <activity-alias\n"
+        '            android:name="ViewPermissionUsageActivity"\n'
+        '            android:exported="true"\n'
+        '            android:targetActivity=".MainActivity"\n'
+        '            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">\n'
         "            <intent-filter>\n"
         '                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE"/>\n'
         '                <category android:name="android.intent.category.HEALTH_PERMISSIONS"/>\n'
@@ -142,12 +136,15 @@ if "ViewPermissionUsageActivity" not in x:
         "        </activity-alias>\n"
     )
 if extra:
-    x = x.replace("    </application>", extra + "    </application>", 1) if "    </application>" in x else x.replace("</application>", extra + "</application>", 1)
+    if "    </application>" in x:
+        x = x.replace("    </application>", extra + "    </application>", 1)
+    else:
+        x = x.replace("</application>", extra + "</application>", 1)
 
 try:
     xml.dom.minidom.parseString(x.encode("utf-8"))
-except Exception as e:
-    fail("AndroidManifest.xml error: " + str(e))
+except Exception as e:  # noqa: BLE001
+    fail("AndroidManifest.xml после правки не читается как XML: " + str(e))
 manifest_path.write_text(x, encoding="utf-8")
 print("OK AndroidManifest.xml")
 
@@ -155,8 +152,12 @@ print("OK AndroidManifest.xml")
 kotlin_dir = pathlib.Path("android/app/src/main/kotlin") / pathlib.Path(*PACKAGE.split("."))
 kotlin_dir.mkdir(parents=True, exist_ok=True)
 (kotlin_dir / "MainActivity.kt").write_text(
-    f"package {PACKAGE}\n\nimport io.flutter.embedding.android.FlutterFragmentActivity\n\nclass MainActivity : FlutterFragmentActivity()\n",
+    f"package {PACKAGE}\n\n"
+    "import io.flutter.embedding.android.FlutterFragmentActivity\n\n"
+    "class MainActivity : FlutterFragmentActivity()\n",
     encoding="utf-8",
 )
 print("OK MainActivity.kt")
-print("\n===== DONE =====")
+
+print("\n===== итоговый build.gradle.kts =====")
+print(g)
