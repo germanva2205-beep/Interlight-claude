@@ -6,7 +6,8 @@
 Что делает:
   1. build.gradle.kts: minSdk 26, включает desugaring и добавляет его зависимость;
   2. AndroidManifest.xml: разрешения, Health Connect, приёмники уведомлений;
-  3. MainActivity.kt: FlutterFragmentActivity (нужна для Health Connect).
+  3. MainActivity.kt: FlutterFragmentActivity (нужна для Health Connect);
+  4. gradle.properties: несовпадение версий JVM у плагинов считается предупреждением, а не ошибкой.
 Повторный запуск безопасен: уже добавленное второй раз не добавляется.
 """
 import pathlib
@@ -158,6 +159,17 @@ kotlin_dir.mkdir(parents=True, exist_ok=True)
     encoding="utf-8",
 )
 print("OK MainActivity.kt")
+
+# ───────────────────────── 4. gradle.properties ─────────────────────────
+# Плагины вроде flutter_timezone собраны с Java 11 и Kotlin 1.8; Gradle считает это ошибкой
+# («Inconsistent JVM Target Compatibility»). Переводим проверку в предупреждение.
+props_path = pathlib.Path("android/gradle.properties")
+props = props_path.read_text(encoding="utf-8") if props_path.exists() else ""
+JVM_LINE = "kotlin.jvm.target.validation.mode=warning"
+if JVM_LINE not in props:
+    props = props.rstrip("\n") + ("\n" if props.strip() else "") + JVM_LINE + "\n"
+    props_path.write_text(props, encoding="utf-8")
+print("OK gradle.properties")
 
 print("\n===== итоговый build.gradle.kts =====")
 print(g)
