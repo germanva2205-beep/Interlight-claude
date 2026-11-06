@@ -152,10 +152,30 @@ print("OK AndroidManifest.xml")
 # ───────────────────────── 3. MainActivity.kt ─────────────────────────
 kotlin_dir = pathlib.Path("android/app/src/main/kotlin") / pathlib.Path(*PACKAGE.split("."))
 kotlin_dir.mkdir(parents=True, exist_ok=True)
+# MainActivity: FlutterFragmentActivity для Health Connect и канал, отдающий часовой пояс телефона
+# (он заменяет сторонний плагин flutter_timezone, который не собирается с новым Flutter).
 (kotlin_dir / "MainActivity.kt").write_text(
-    f"package {PACKAGE}\n\n"
-    "import io.flutter.embedding.android.FlutterFragmentActivity\n\n"
-    "class MainActivity : FlutterFragmentActivity()\n",
+    f"""package {PACKAGE}
+
+import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import java.util.TimeZone
+
+class MainActivity : FlutterFragmentActivity() {{
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {{
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "interlight/timezone")
+            .setMethodCallHandler {{ call, result ->
+                if (call.method == "getLocalTimezone") {{
+                    result.success(TimeZone.getDefault().id)
+                }} else {{
+                    result.notImplemented()
+                }}
+            }}
+    }}
+}}
+""",
     encoding="utf-8",
 )
 print("OK MainActivity.kt")
