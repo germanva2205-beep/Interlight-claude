@@ -2345,7 +2345,7 @@ class _CheckInCameraScreenState extends State<CheckInCameraScreen>
   bool _initializing = false;
   int? _countdown;
   double _ghostOpacity = 0.4;
-  bool _flipGhost = true; // превью фронтальной камеры зеркальное
+  bool _flipGhost = false; // задняя камера не зеркальная
   bool _useTimer = true;
 
   CheckIn? get _last =>
@@ -2389,7 +2389,7 @@ class _CheckInCameraScreenState extends State<CheckInCameraScreen>
         return;
       }
       final cam = cams.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
+        (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => cams.first,
       );
       final ctrl = CameraController(cam, ResolutionPreset.high, enableAudio: false);
