@@ -1145,7 +1145,7 @@ class StepsCard extends StatelessWidget {
 
 /// Адрес сервера для наблюдений ИИ (маршрут /insight из recipe_backend.js).
 /// Пока пусто — показывается простое наблюдение по вашим данным без ИИ и без отправки фото.
-const String kInsightApiUrl = kAiBaseUrl.isEmpty ? '' : '$kAiBaseUrl/insight';
+const String kInsightApiUrl = kAiBaseUrl == '' ? '' : '$kAiBaseUrl/insight';
 
 String localInsight(List<CheckIn> list) {
   if (list.isEmpty) return '';
@@ -2661,7 +2661,7 @@ class _CheckInCameraScreenState extends State<CheckInCameraScreen>
 /// Адрес вашего сервера, который обращается к ИИ (см. recipe_backend.js).
 /// Пока пусто — работает встроенная небольшая база рецептов.
 /// Ключ ИИ в приложение класть нельзя: он должен храниться только на сервере.
-const String kRecipeApiUrl = kAiBaseUrl.isEmpty ? '' : '$kAiBaseUrl/recipes';
+const String kRecipeApiUrl = kAiBaseUrl == '' ? '' : '$kAiBaseUrl/recipes';
 
 class Recipe {
   final String title;
@@ -3527,7 +3527,7 @@ class GardenPage extends StatelessWidget {
 
 /// Адрес сервера для распознавания блюд (маршрут /plate из recipe_backend.js).
 /// Пока пусто: можно только ввести калории вручную.
-const String kPlateApiUrl = kAiBaseUrl.isEmpty ? '' : '$kAiBaseUrl/plate';
+const String kPlateApiUrl = kAiBaseUrl == '' ? '' : '$kAiBaseUrl/plate';
 
 class PlateItem {
   final String name;
