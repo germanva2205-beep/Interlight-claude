@@ -47,7 +47,7 @@ class AppColors {
 }
 
 /// Адрес сервера с ИИ (backend/worker.js, без «/» на конце). Пока пусто — ИИ выключен.
-const String kAiBaseUrl = '';
+const String kAiBaseUrl = 'https://still-resonance-ad71.germanva2205.workers.dev';
 
 const int kBonusKcal = 150; // бонус за шаги, ккал
 const int kWaterGoal = 8; // стаканов в день
