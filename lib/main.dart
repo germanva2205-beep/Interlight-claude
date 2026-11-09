@@ -1446,6 +1446,16 @@ class MealKcalCard extends StatelessWidget {
         final over = left < 0;
         final barColor = over ? const Color(0xFFE59A7A) : AppColors.mint;
 
+        // Два приёма пищи в окне питания (интервальное голодание, например 16:8):
+        // обед крупнее ужина; БЖУ по доле калорий: белки 25%, жиры 30%, углеводы 45%.
+        String recommend(double share) {
+          final k = (limit * share / 10).round() * 10;
+          final p = (k * 0.25 / 4).round();
+          final f = (k * 0.30 / 9).round();
+          final cb = (k * 0.45 / 4).round();
+          return 'Рекомендуем ≈ $k ккал · Б $p г · Ж $f г · У $cb г';
+        }
+
         Widget mealRow(String label, int kcal, bool lunch) => InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () => editKcal(context, c, lunch: lunch),
@@ -1453,8 +1463,18 @@ class MealKcalCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Row(
                   children: [
-                    Text(label, style: const TextStyle(fontSize: 16, color: AppColors.darkGraphite)),
-                    const Spacer(),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(label, style: const TextStyle(fontSize: 16, color: AppColors.darkGraphite)),
+                          Text(
+                            recommend(lunch ? 0.55 : 0.45),
+                            style: const TextStyle(fontSize: 12, color: AppColors.fogGray),
+                          ),
+                        ],
+                      ),
+                    ),
                     Text(
                       kcal > 0 ? '$kcal ккал' : 'Добавить',
                       style: TextStyle(
