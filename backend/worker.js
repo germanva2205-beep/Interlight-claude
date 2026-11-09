@@ -23,7 +23,10 @@ async function gemini(env, parts) {
       }),
     },
   );
-  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 300);
+    throw new Error(`Gemini ${res.status}: ${detail}`);
+  }
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
   if (!text) throw new Error('empty');
@@ -83,7 +86,8 @@ export default {
     if (!handler) return reply({ error: 'not found' }, 404);
     try {
       return reply(await handler(env, await request.json()));
-    } catch {
+    } catch (e) {
+      console.error(String(e?.message ?? e));
       return reply({ error: 'ai_failed' }, 502);
     }
   },
