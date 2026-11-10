@@ -172,9 +172,17 @@ class UserSettings {
 
   /// Привычки дня. Очки не даются за калории и вес: сад растёт от заботы о себе.
   List<GardenHabit> get habits => [
-        GardenHabit('Вода', '$waterGlasses / $kWaterGoal', waterGlasses >= kWaterGoal),
-        GardenHabit('Витамины', '$vitaminDoses / $kVitaminGoal', vitaminDoses >= kVitaminGoal),
-        GardenHabit('Разминка', '$warmups / $kWarmupGoal', warmups >= kWarmupGoal),
+        GardenHabit('Вода', '$waterMl / $waterGoalMl мл', waterMl >= waterGoalMl),
+        GardenHabit(
+          'Приёмы',
+          '${intakeSlots.where((x) => x.done).length} / ${intakeSlots.length}',
+          intakeSlots.isNotEmpty && intakeSlots.every((x) => x.done),
+        ),
+        GardenHabit(
+          'Разминка',
+          todayExercises.isNotEmpty ? '1 / 1' : '0 / 1',
+          todayExercises.isNotEmpty,
+        ),
         GardenHabit('Норма шагов', '$stepsToday / $stepsGoal', stepsToday >= stepsGoal),
         GardenHabit(
           'Обед и ужин записаны',
@@ -1347,8 +1355,11 @@ class MiniDial extends StatelessWidget {
   final IconData icon;
   final int value;
   final int goal;
+  final String? valueText;
+  final bool isLocked;
+  final String? lockText;
   final VoidCallback onAdd;
-  final VoidCallback onUndo;
+  final VoidCallback? onUndo;
 
   const MiniDial({
     super.key,
@@ -1357,11 +1368,15 @@ class MiniDial extends StatelessWidget {
     required this.value,
     required this.goal,
     required this.onAdd,
-    required this.onUndo,
+    this.onUndo,
+    this.valueText,
+    this.isLocked = false,
+    this.lockText,
   });
 
   @override
   Widget build(BuildContext context) {
+    final color = isLocked ? AppColors.fogGray : AppColors.mint;
     return Material(
       color: AppColors.white,
       elevation: 2,
@@ -1384,20 +1399,20 @@ class MiniDial extends StatelessWidget {
                   children: [
                     SizedBox.expand(
                       child: CircularProgressIndicator(
-                        value: (value / goal).clamp(0.0, 1.0),
+                        value: goal <= 0 ? 0.0 : (value / goal).clamp(0.0, 1.0),
                         strokeWidth: 5,
                         backgroundColor: Colors.grey[200],
-                        valueColor: const AlwaysStoppedAnimation<Color>(AppColors.mint),
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
                       ),
                     ),
-                    Icon(icon, size: 20, color: AppColors.mint),
+                    Icon(icon, size: 20, color: color),
                   ],
                 ),
               ),
               const SizedBox(height: 6),
               Text(label, style: const TextStyle(fontSize: 12, color: AppColors.fogGray)),
               Text(
-                '$value / $goal',
+                isLocked && lockText != null ? lockText! : (valueText ?? '$value / $goal'),
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -1412,17 +1427,290 @@ class MiniDial extends StatelessWidget {
   }
 }
 
-class DailyTrackers extends StatelessWidget {
+String _hhmm(int minute) => '${twoDigits(minute ~/ 60)}:${twoDigits(minute % 60)}';
+
+class DailyTrackers extends StatefulWidget {
   final SettingsController controller;
   const DailyTrackers({super.key, required this.controller});
 
   @override
+  State<DailyTrackers> createState() => _DailyTrackersState();
+}
+
+class _DailyTrackersState extends State<DailyTrackers> {
+  Timer? _tick;
+
+  SettingsController get c => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _waterLeftSec() > 0) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  /// Сколько секунд осталось до следующей порции воды.
+  int _waterLeftSec() {
+    final n = DateTime.now();
+    final nowSec = n.hour * 3600 + n.minute * 60 + n.second;
+    return max(0, c.s.waterNextAvailableMin * 60 - nowSec);
+  }
+
+  String _mmss(int sec) => '${twoDigits(sec ~/ 60)}:${twoDigits(sec % 60)}';
+
+  void _addWater(int ml) {
+    final n = DateTime.now();
+    final next = min(1439, n.hour * 60 + n.minute + c.s.waterCooldownMin);
+    c.update((x) {
+      x.waterMl += ml;
+      x.waterNextAvailableMin = next;
+    });
+  }
+
+  void _undoWater() {
+    c.update((x) {
+      x.waterMl = max(0, x.waterMl - x.waterGlassMl);
+      x.waterNextAvailableMin = 0;
+    });
+  }
+
+  Future<void> _waterSheet() async {
+    if (_waterLeftSec() > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Следующая порция через ${_mmss(_waterLeftSec())}')),
+      );
+      return;
+    }
+    final sizes = <(String, int)>[
+      ('Стакан', c.s.waterGlassMl),
+      ('Кружка', 300),
+      ('Бутылка', 500),
+    ];
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final o in sizes)
+              ListTile(
+                leading: const Icon(Icons.water_drop_outlined, color: AppColors.mint),
+                title: Text('${o.$1} · ${o.$2} мл'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _addWater(o.$2);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.undo),
+              title: Text('Отменить последнюю порцию (−${c.s.waterGlassMl} мл)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _undoWater();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text('Отмена'),
+              onTap: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addSlot() async {
+    var time = const TimeOfDay(hour: 9, minute: 0);
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('Новый приём'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(hintText: 'Например, витамин D'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.schedule),
+                label: Text(_hhmm(time.hour * 60 + time.minute)),
+                onPressed: () async {
+                  final t = await showTimePicker(context: ctx, initialTime: time);
+                  if (t != null) setD(() => time = t);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Добавить')),
+          ],
+        ),
+      ),
+    );
+    final label = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true) return;
+    await c.update((x) {
+      x.intakeSlots = [
+        ...x.intakeSlots,
+        IntakeSlot(time.hour * 60 + time.minute, label.isEmpty ? 'Приём' : label),
+      ]..sort((a, b) => a.minute.compareTo(b.minute));
+    });
+  }
+
+  Future<void> _intakeSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: ListenableBuilder(
+          listenable: c,
+          builder: (ctx, _) {
+            final slots = c.s.intakeSlots;
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  const ListTile(
+                    title: Text('Приёмы на сегодня', style: TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('Смахните вправо, чтобы удалить.'),
+                  ),
+                  for (var i = 0; i < slots.length; i++)
+                    Dismissible(
+                      key: ValueKey('${slots[i].minute}-${slots[i].label}-$i'),
+                      direction: DismissDirection.startToEnd,
+                      background: Container(
+                        color: AppColors.peach,
+                        alignment: Alignment.centerLeft,
+                        padding: const EdgeInsets.only(left: 20),
+                        child: const Icon(Icons.delete_outline),
+                      ),
+                      onDismissed: (_) => c.update((x) => x.intakeSlots = [
+                            for (var j = 0; j < x.intakeSlots.length; j++)
+                              if (j != i) x.intakeSlots[j],
+                          ]),
+                      child: CheckboxListTile(
+                        activeColor: AppColors.mint,
+                        value: slots[i].done,
+                        title: Text(
+                          slots[i].label,
+                          style: TextStyle(
+                            decoration: slots[i].done ? TextDecoration.lineThrough : null,
+                          ),
+                        ),
+                        subtitle: Text(_hhmm(slots[i].minute)),
+                        onChanged: (v) => c.update((x) => x.intakeSlots = [
+                              for (var j = 0; j < x.intakeSlots.length; j++)
+                                j == i ? x.intakeSlots[j].copyWith(done: v ?? false) : x.intakeSlots[j],
+                            ]),
+                      ),
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.add, color: AppColors.mint),
+                    title: const Text('Добавить приём'),
+                    onTap: _addSlot,
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _customExercise() async {
+    final nameCtrl = TextEditingController();
+    final kcalCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Своё упражнение'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(hintText: 'Название')),
+            TextField(
+              controller: kcalCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(hintText: 'Ккал'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Добавить')),
+        ],
+      ),
+    );
+    final name = nameCtrl.text.trim();
+    final kcal = int.tryParse(kcalCtrl.text.trim()) ?? 0;
+    nameCtrl.dispose();
+    kcalCtrl.dispose();
+    if (ok != true || name.isEmpty || kcal <= 0) return;
+    await c.update((x) => x.todayExercises = [...x.todayExercises, Exercise(name, min(kcal, 2000))]);
+  }
+
+  Future<void> _exerciseSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text('Разминка (≈5 минут)', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              for (final e in kExerciseBase)
+                ListTile(
+                  leading: const Icon(Icons.directions_run, color: AppColors.mint),
+                  title: Text(e.name),
+                  trailing: Text('${e.kcal} ккал'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    c.update((x) => x.todayExercises = [...x.todayExercises, e]);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Своё упражнение'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _customExercise();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final c = controller;
     return ListenableBuilder(
       listenable: c,
       builder: (context, _) {
         final s = c.s;
+        final left = _waterLeftSec();
+        final doneSlots = s.intakeSlots.where((x) => x.done).length;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1430,23 +1718,26 @@ class DailyTrackers extends StatelessWidget {
               children: [
                 Expanded(
                   child: MiniDial(
-                    label: 'Вода',
+                    label: 'Вода, мл',
                     icon: Icons.water_drop_outlined,
-                    value: s.waterGlasses,
-                    goal: kWaterGoal,
-                    onAdd: () => c.update((x) => x.waterGlasses = min(kWaterGoal, x.waterGlasses + 1)),
-                    onUndo: () => c.update((x) => x.waterGlasses = max(0, x.waterGlasses - 1)),
+                    value: s.waterMl,
+                    goal: s.waterGoalMl,
+                    valueText: '${s.waterMl}/${s.waterGoalMl}',
+                    isLocked: left > 0,
+                    lockText: '⏳ ${_mmss(left)}',
+                    onAdd: _waterSheet,
+                    onUndo: _undoWater,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: MiniDial(
-                    label: 'Витамины',
+                    label: 'Приёмы',
                     icon: Icons.medication_outlined,
-                    value: s.vitaminDoses,
-                    goal: kVitaminGoal,
-                    onAdd: () => c.update((x) => x.vitaminDoses = min(kVitaminGoal, x.vitaminDoses + 1)),
-                    onUndo: () => c.update((x) => x.vitaminDoses = max(0, x.vitaminDoses - 1)),
+                    value: doneSlots,
+                    goal: s.intakeSlots.length,
+                    valueText: s.intakeSlots.isEmpty ? 'добавить' : '$doneSlots / ${s.intakeSlots.length}',
+                    onAdd: _intakeSheet,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1454,10 +1745,15 @@ class DailyTrackers extends StatelessWidget {
                   child: MiniDial(
                     label: 'Разминка',
                     icon: Icons.directions_run,
-                    value: s.warmups,
-                    goal: kWarmupGoal,
-                    onAdd: () => c.update((x) => x.warmups = min(kWarmupGoal, x.warmups + 1)),
-                    onUndo: () => c.update((x) => x.warmups = max(0, x.warmups - 1)),
+                    value: s.todayExercises.isEmpty ? 0 : 1,
+                    goal: 1,
+                    valueText: '${s.exerciseKcal} ккал',
+                    onAdd: _exerciseSheet,
+                    onUndo: () => c.update((x) {
+                      if (x.todayExercises.isNotEmpty) {
+                        x.todayExercises = x.todayExercises.sublist(0, x.todayExercises.length - 1);
+                      }
+                    }),
                   ),
                 ),
               ],
@@ -1465,7 +1761,7 @@ class DailyTrackers extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(top: 6, left: 4),
               child: Text(
-                'Нажмите, чтобы отметить; удерживайте, чтобы отменить.',
+                'Нажмите, чтобы отметить; у воды и разминки удерживайте, чтобы отменить последнее.',
                 style: TextStyle(fontSize: 12, color: AppColors.fogGray),
               ),
             ),
@@ -4141,6 +4437,37 @@ class SettingsPage extends StatelessWidget {
             child: CalorieLimitFields(controller: c),
           ),
           SectionCard(title: 'Норма шагов в день', child: StepsGoalFields(controller: c)),
+          SectionCard(
+            title: 'Вода',
+            child: Column(
+              children: [
+                SliderRow(
+                  label: 'Цель на день',
+                  value: c.s.waterGoalMl,
+                  min: 1000,
+                  max: 4000,
+                  unit: 'мл',
+                  onChanged: (v) => c.update((s) => s.waterGoalMl = v),
+                ),
+                SliderRow(
+                  label: 'Размер стакана',
+                  value: c.s.waterGlassMl,
+                  min: 150,
+                  max: 400,
+                  unit: 'мл',
+                  onChanged: (v) => c.update((s) => s.waterGlassMl = v),
+                ),
+                SliderRow(
+                  label: 'Пауза между порциями',
+                  value: c.s.waterCooldownMin,
+                  min: 15,
+                  max: 120,
+                  unit: 'мин',
+                  onChanged: (v) => c.update((s) => s.waterCooldownMin = v),
+                ),
+              ],
+            ),
+          ),
           SectionCard(title: 'Время приёмов пищи', child: MealFields(controller: c)),
           SectionCard(
             title: 'Напоминания',
