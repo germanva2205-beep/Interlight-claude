@@ -97,7 +97,30 @@ async function plate(env, body) {
   return gemini(env, [{ text: prompt }, img(body.photo)]);
 }
 
-const ROUTES = { '/recipes': recipes, '/insight': insight, '/plate': plate };
+async function fastingTips(env, body) {
+  const eating = body.eating === true;
+  const info = {
+    сейчас: eating ? 'окно питания' : 'интервал голодания',
+    'минут до следующего приёма': Number(body.minutesLeft) || 0,
+    'следующий приём': body.nextMeal === 'ужин' ? 'ужин' : 'обед',
+    'время обеда': String(body.lunch ?? ''),
+    'время ужина': String(body.dinner ?? ''),
+    'ограничения по здоровью': String(body.health ?? 'без ограничений'),
+  };
+  const prompt =
+    'Ты дружелюбный помощник по интервальному питанию (режим из двух приёмов: обед и ужин). ' +
+    'На русском языке дай 4–5 коротких практичных советов, что можно есть или пить именно сейчас, ' +
+    'а чего лучше избегать (например, сладкие напитки, сок, молоко в кофе во время интервала). ' +
+    'Если сейчас окно питания — подскажи, какой должна быть еда, чтобы интервал прошёл легче. ' +
+    'Тон поддерживающий, без давления, без диагнозов и лечебных рекомендаций. ' +
+    'Верни JSON: {"tips":[string]}. ' +
+    `Данные: ${JSON.stringify(info)}`;
+  const out = await gemini(env, [{ text: prompt }]);
+  const tips = Array.isArray(out.tips) ? out.tips.map((x) => String(x)).filter(Boolean).slice(0, 6) : [];
+  return { tips };
+}
+
+const ROUTES = { '/recipes': recipes, '/insight': insight, '/plate': plate, '/fasting-tips': fastingTips };
 
 export default {
   async fetch(request, env) {
