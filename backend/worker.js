@@ -2,7 +2,7 @@
 // Ключ хранится только здесь, в секрете GEMINI_API_KEY, и в приложение не попадает.
 // Маршруты: POST /recipes, /insight, /plate.
 
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-flash-latest';
 
 function reply(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
