@@ -3594,6 +3594,122 @@ class _RecipesPageState extends State<RecipesPage> {
 
 // ───────────────────────── Онбординг ─────────────────────────
 
+const List<String> kActivityLabels = [
+  'Сидячий',
+  'Лёгкая активность',
+  'Умеренная активность',
+  'Высокая активность',
+];
+const List<String> kHealthLabels = ['Без ограничений', 'Суставы', 'Сердце'];
+
+/// Образ жизни и особенности здоровья: влияют на норму и советы.
+class LifestyleFields extends StatelessWidget {
+  final SettingsController controller;
+  const LifestyleFields({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    return ListenableBuilder(
+      listenable: c,
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Образ жизни', style: TextStyle(color: AppColors.fogGray, fontSize: 15)),
+          const SizedBox(height: 8),
+          ChoiceWrap<int>(
+            options: const [0, 1, 2, 3],
+            selected: c.s.activityLevel,
+            labelOf: (i) => kActivityLabels[i],
+            onSelected: (i) => c.update((s) => s.activityLevel = i),
+          ),
+          const SizedBox(height: 16),
+          const Text('Особенности здоровья (по желанию)',
+              style: TextStyle(color: AppColors.fogGray, fontSize: 15)),
+          const SizedBox(height: 8),
+          ChoiceWrap<int>(
+            options: const [0, 1, 2],
+            selected: c.s.healthLimit,
+            labelOf: (i) => kHealthLabels[i],
+            onSelected: (i) => c.update((s) => s.healthLimit = i),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Финальный экран онбординга: персональный план.
+class LifestylePlanCard extends StatelessWidget {
+  final SettingsController controller;
+  const LifestylePlanCard({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    return ListenableBuilder(
+      listenable: c,
+      builder: (context, _) {
+        final s = c.s;
+        Widget row(String title, String text) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                  Text(text, style: const TextStyle(fontSize: 15, color: AppColors.darkGraphite)),
+                ],
+              ),
+            );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SectionCard(
+              title: 'Ваш план',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  row(
+                    'Калории',
+                    'Норма ~${s.calorieTarget} ккал в день'
+                        '${s.goal == Goal.lose ? '. Мягкий дефицит для похудения' : ''}.',
+                  ),
+                  row(
+                    'Окно питания',
+                    'Обед в ${_hhmm(s.lunchMin)}, ужин в ${_hhmm(s.dinnerMin)}. Вне окна — только вода.',
+                  ),
+                  row(
+                    'Активность',
+                    'Норма: ${s.stepsGoal} шагов. Пройдёте ещё 2000 — лимит калорий вырастет.',
+                  ),
+                ],
+              ),
+            ),
+            SectionCard(
+              title: 'Три совета на старт',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final t in s.lifestyleTips)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text('• $t', style: const TextStyle(fontSize: 15)),
+                    ),
+                ],
+              ),
+            ),
+            const Text(
+              'Все настройки можно изменить позже в разделе «Настройки». '
+              'Этот план — просто ориентир на первые недели.',
+              style: TextStyle(fontSize: 12, color: AppColors.fogGray),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class OnboardingFlow extends StatefulWidget {
   final SettingsController controller;
   const OnboardingFlow({super.key, required this.controller});
@@ -3603,7 +3719,7 @@ class OnboardingFlow extends StatefulWidget {
 }
 
 class _OnboardingFlowState extends State<OnboardingFlow> {
-  static const int _lastPage = 3;
+  static const int _lastPage = 4;
   final PageController _pages = PageController();
   int _page = 0;
   bool _accepted = false;
@@ -3712,6 +3828,7 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
                     _scroll([
                       _heading('Параметры', 'Нужны для ориентира по калориям.'),
                       SectionCard(title: 'Ваши данные', child: BodyFields(controller: c)),
+                      SectionCard(title: 'Образ жизни', child: LifestyleFields(controller: c)),
                       CalorieCard(controller: c),
                     ]),
                     // 3. Шаги и режим питания
@@ -3725,6 +3842,11 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
                         title: 'Время приёмов пищи',
                         child: MealFields(controller: c),
                       ),
+                    ]),
+                    // 4. Персональный план
+                    _scroll([
+                      _heading('Твой персональный план', 'Собран по вашей анкете.'),
+                      LifestylePlanCard(controller: c),
                     ]),
                   ],
                 ),
@@ -3758,7 +3880,7 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
                     FilledButton(
                       style: FilledButton.styleFrom(backgroundColor: AppColors.mint),
                       onPressed: canNext ? _next : null,
-                      child: Text(_page == _lastPage ? 'Начать' : 'Далее'),
+                      child: Text(_page == _lastPage ? 'Начать путь 🚀' : 'Далее'),
                     ),
                   ],
                 ),
