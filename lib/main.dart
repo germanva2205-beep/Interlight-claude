@@ -197,7 +197,7 @@ class UserSettings {
   /// лёгкая активность). Ниже безопасного минимума не опускается.
   int get calorieTarget {
     final bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (isFemale ? -161 : 5);
-    var kcal = bmr * 1.35;
+    var kcal = bmr * const [1.2, 1.375, 1.55, 1.725][activityLevel];
     if (goal == Goal.lose) kcal *= 0.85;
     final minimum = isFemale ? 1200 : 1500;
     final rounded = ((kcal / 50).round()) * 50;
@@ -235,6 +235,36 @@ class UserSettings {
   int get bonusSteps => stepsGoal + 2000;
 
   int get eatenKcal => lunchKcal + dinnerKcal;
+
+  /// Калории от шагов за сегодня.
+  int get stepsKcal => kcalForSteps(stepsToday);
+
+  /// Калории от выполненных упражнений разминки.
+  int get exerciseKcal => todayExercises.fold(0, (a, e) => a + e.kcal);
+
+  /// Вся сегодняшняя активность, ккал.
+  int get activityBurned => stepsKcal + exerciseKcal;
+
+  /// Живой лимит: норма плюс активность.
+  int get dynamicLimit => baseLimit + activityBurned;
+
+  /// Съедено минус живой лимит: меньше нуля — дефицит, больше — профицит.
+  int get netBalance => eatenKcal - dynamicLimit;
+
+  /// Три совета на старт по данным анкеты.
+  List<String> get lifestyleTips => [
+        goal == Goal.lose
+            ? 'Мягкий дефицит: держитесь около $baseLimit ккал в день и не урезайте ниже $minLimit.'
+            : 'Ориентир по калориям — около $baseLimit ккал в день.',
+        activityLevel <= 1
+            ? 'Начните с $stepsGoal шагов в день: прогулка после еды помогает и пищеварению.'
+            : 'Вы активны, поэтому не забывайте про шаги ($stepsGoal в день) и восстановление.',
+        healthLimit == 1
+            ? 'Для разминки выбирайте упражнения с малой нагрузкой на суставы: растяжка, планка.'
+            : healthLimit == 2
+                ? 'При проблемах с сердцем наращивайте нагрузку плавно и согласуйте её с врачом.'
+                : 'Пейте воду в течение дня: цель — $waterGoalMl мл.',
+      ];
 }
 
 class SettingsController extends ChangeNotifier {
