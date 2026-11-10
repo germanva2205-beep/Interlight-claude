@@ -85,6 +85,47 @@ class GardenHabit {
   const GardenHabit(this.label, this.detail, this.done);
 }
 
+/// Упражнение разминки с расходом калорий.
+class Exercise {
+  final String name;
+  final int kcal;
+  const Exercise(this.name, this.kcal);
+
+  Map<String, dynamic> toJson() => {'name': name, 'kcal': kcal};
+
+  factory Exercise.fromJson(Map<String, dynamic> j) =>
+      Exercise((j['name'] as String?) ?? '', (j['kcal'] as num?)?.toInt() ?? 0);
+}
+
+/// Встроенная база упражнений (расход примерно за 5 минут).
+const List<Exercise> kExerciseBase = [
+  Exercise('Приседания', 30),
+  Exercise('Планка', 25),
+  Exercise('Джампинг Джек', 40),
+  Exercise('Растяжка', 15),
+  Exercise('Отжимания', 20),
+  Exercise('Выпады', 28),
+  Exercise('Бег на месте', 35),
+];
+
+/// Приём витамина, лекарства или добавки в заданное время.
+class IntakeSlot {
+  final int minute; // минуты от полуночи
+  final String label;
+  final bool done;
+  const IntakeSlot(this.minute, this.label, {this.done = false});
+
+  IntakeSlot copyWith({bool? done}) => IntakeSlot(minute, label, done: done ?? this.done);
+
+  Map<String, dynamic> toJson() => {'minute': minute, 'label': label, 'done': done};
+
+  factory IntakeSlot.fromJson(Map<String, dynamic> j) => IntakeSlot(
+        (j['minute'] as num?)?.toInt() ?? 0,
+        (j['label'] as String?) ?? '',
+        done: (j['done'] as bool?) ?? false,
+      );
+}
+
 class UserSettings {
   bool onboardingDone = false;
   String name = '';
@@ -115,6 +156,17 @@ class UserSettings {
   int vitaminDoses = 0;
   int warmups = 0;
   bool bonusClaimed = false;
+  int activityLevel = 1; // 0 сидячий, 1 лёгкая, 2 умеренная, 3 высокая активность
+  int healthLimit = 0; // 0 без ограничений, 1 суставы, 2 сердце
+  int waterMl = 0; // выпито сегодня, мл
+  int waterGoalMl = 2000;
+  int waterGlassMl = 200; // размер базового стакана
+  int waterCooldownMin = 30; // пауза между порциями
+  int waterIntervalMin = 10; // шаг напоминаний о воде
+  int waterNextAvailableMin = 0; // минута суток, с которой можно пить снова
+  bool intakeRemindersOn = true;
+  List<IntakeSlot> intakeSlots = [];
+  List<Exercise> todayExercises = [];
   int gardenBanked = 0; // очки сада за прошлые дни
   int gardenGoodDays = 0; // дни, когда выполнено 3 привычки из 5 и больше
 
@@ -303,11 +355,32 @@ class SettingsController extends ChangeNotifier {
     s.vitaminDoses = _prefs.getInt('vitaminDoses') ?? 0;
     s.warmups = _prefs.getInt('warmups') ?? 0;
     s.bonusClaimed = _prefs.getBool('bonusClaimed') ?? false;
+    s.activityLevel = max(0, min(3, _prefs.getInt('activityLevel') ?? d.activityLevel));
+    s.healthLimit = max(0, min(2, _prefs.getInt('healthLimit') ?? d.healthLimit));
+    s.waterMl = _prefs.getInt('waterMl') ?? 0;
+    s.waterGoalMl = _prefs.getInt('waterGoalMl') ?? d.waterGoalMl;
+    s.waterGlassMl = _prefs.getInt('waterGlassMl') ?? d.waterGlassMl;
+    s.waterCooldownMin = _prefs.getInt('waterCooldownMin') ?? d.waterCooldownMin;
+    s.waterIntervalMin = _prefs.getInt('waterIntervalMin') ?? d.waterIntervalMin;
+    s.waterNextAvailableMin = _prefs.getInt('waterNextAvailableMin') ?? 0;
+    s.intakeRemindersOn = _prefs.getBool('intakeRemindersOn') ?? d.intakeRemindersOn;
+    s.intakeSlots = _decodeList(_prefs.getString('intakeSlots'), IntakeSlot.fromJson)
+      ..sort((a, b) => a.minute.compareTo(b.minute));
+    s.todayExercises = _decodeList(_prefs.getString('todayExercises'), Exercise.fromJson);
     s.gardenBanked = _prefs.getInt('gardenBanked') ?? 0;
     s.gardenGoodDays = _prefs.getInt('gardenGoodDays') ?? 0;
     _loadCheckIns();
     insightText = _prefs.getString('insightText') ?? '';
     _rolloverIfNewDay();
+  }
+
+  static List<T> _decodeList<T>(String? raw, T Function(Map<String, dynamic>) fromJson) {
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().map(fromJson).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   static String _todayKey() {
@@ -332,6 +405,10 @@ class SettingsController extends ChangeNotifier {
     s.vitaminDoses = 0;
     s.warmups = 0;
     s.bonusClaimed = false;
+    s.waterMl = 0;
+    s.waterNextAvailableMin = 0;
+    s.intakeSlots = [for (final x in s.intakeSlots) x.copyWith(done: false)];
+    s.todayExercises = [];
     return true;
   }
 
@@ -372,6 +449,17 @@ class SettingsController extends ChangeNotifier {
     await _prefs.setInt('vitaminDoses', s.vitaminDoses);
     await _prefs.setInt('warmups', s.warmups);
     await _prefs.setBool('bonusClaimed', s.bonusClaimed);
+    await _prefs.setInt('activityLevel', s.activityLevel);
+    await _prefs.setInt('healthLimit', s.healthLimit);
+    await _prefs.setInt('waterMl', s.waterMl);
+    await _prefs.setInt('waterGoalMl', s.waterGoalMl);
+    await _prefs.setInt('waterGlassMl', s.waterGlassMl);
+    await _prefs.setInt('waterCooldownMin', s.waterCooldownMin);
+    await _prefs.setInt('waterIntervalMin', s.waterIntervalMin);
+    await _prefs.setInt('waterNextAvailableMin', s.waterNextAvailableMin);
+    await _prefs.setBool('intakeRemindersOn', s.intakeRemindersOn);
+    await _prefs.setString('intakeSlots', jsonEncode(s.intakeSlots.map((x) => x.toJson()).toList()));
+    await _prefs.setString('todayExercises', jsonEncode(s.todayExercises.map((x) => x.toJson()).toList()));
     await _prefs.setInt('gardenBanked', s.gardenBanked);
     await _prefs.setInt('gardenGoodDays', s.gardenGoodDays);
   }
