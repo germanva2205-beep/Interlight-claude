@@ -4774,67 +4774,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _showWhatCanIDo(FastingStatus status) {
-    final canEat = status.isEatingWindow;
-    final title = canEat ? 'Сейчас окно питания' : 'Сейчас интервал';
-    final items = canEat
-        ? const [
-            'Полноценный приём пищи 🍽️',
-            'Вода или чай — по желанию',
-          ]
-        : const [
-            'Тёплая или обычная вода 💧',
-            'Несладкий чай 🍵',
-            'Чёрный кофе без сахара ☕',
-            'Витамин C и водорастворимые витамины',
-          ];
-
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppColors.darkGraphite,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              canEat
-                  ? 'Следующий интервал начнётся примерно через 45 минут после еды.'
-                  : 'До ${status.nextMeal.genitive}: ${formatDuration(status.remaining)}',
-              style: const TextStyle(fontSize: 14, color: AppColors.fogGray),
-            ),
-            const SizedBox(height: 16),
-            for (final item in items)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle, color: AppColors.mint, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        item,
-                        style: const TextStyle(fontSize: 16, color: AppColors.darkGraphite),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
+      builder: (context) => WhatCanIDoSheet(status: status, settings: widget.controller.s),
     );
   }
 
@@ -4955,6 +4902,177 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         );
       },
+    );
+  }
+}
+
+// ───────────────────────── «Что можно сейчас?» + советы ИИ ─────────────────────────
+
+const String kFastingTipsApiUrl = kAiBaseUrl == '' ? '' : '$kAiBaseUrl/fasting-tips';
+
+class FastingTipsService {
+  static Future<List<String>> fetch(FastingStatus status, UserSettings s) async {
+    if (kFastingTipsApiUrl.isEmpty) throw Exception('no server');
+    final res = await http
+        .post(
+          Uri.parse(kFastingTipsApiUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'eating': status.isEatingWindow,
+            'minutesLeft': status.remaining.inMinutes,
+            'nextMeal': status.nextMeal.genitive == 'ужина' ? 'ужин' : 'обед',
+            'lunch': _hhmm(s.lunchMin),
+            'dinner': _hhmm(s.dinnerMin),
+            'health': kHealthLabels[s.healthLimit.clamp(0, kHealthLabels.length - 1).toInt()],
+          }),
+        )
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final tips = [
+      for (final x in (data['tips'] as List? ?? const []))
+        if (x.toString().trim().isNotEmpty) x.toString().trim(),
+    ];
+    if (tips.isEmpty) throw Exception('empty');
+    return tips;
+  }
+}
+
+class WhatCanIDoSheet extends StatefulWidget {
+  final FastingStatus status;
+  final UserSettings settings;
+  const WhatCanIDoSheet({super.key, required this.status, required this.settings});
+
+  @override
+  State<WhatCanIDoSheet> createState() => _WhatCanIDoSheetState();
+}
+
+class _WhatCanIDoSheetState extends State<WhatCanIDoSheet> {
+  List<String>? _tips;
+  bool _loading = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final tips = await FastingTipsService.fetch(widget.status, widget.settings);
+      if (mounted) setState(() => _tips = tips);
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Widget _row(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: AppColors.mint, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(fontSize: 16, color: AppColors.darkGraphite),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final status = widget.status;
+    final canEat = status.isEatingWindow;
+    final title = canEat ? 'Сейчас окно питания' : 'Сейчас интервал';
+    final items = canEat
+        ? const [
+            'Полноценный приём пищи 🍽️',
+            'Вода или чай — по желанию',
+          ]
+        : const [
+            'Тёплая или обычная вода 💧',
+            'Несладкий чай 🍵',
+            'Чёрный кофе без сахара ☕',
+            'Витамин C и водорастворимые витамины',
+          ];
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: AppColors.darkGraphite,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              canEat
+                  ? 'Следующий интервал начнётся примерно через 45 минут после еды.'
+                  : 'До ${status.nextMeal.genitive}: ${formatDuration(status.remaining)}',
+              style: const TextStyle(fontSize: 14, color: AppColors.fogGray),
+            ),
+            const SizedBox(height: 16),
+            for (final item in items) _row(Icons.check_circle, item),
+            const Divider(height: 32),
+            const Row(
+              children: [
+                Icon(Icons.auto_awesome, color: AppColors.mint, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Советы ИИ',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkGraphite,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: CircularProgressIndicator(color: AppColors.mint)),
+              )
+            else if (_tips != null) ...[
+              for (final tip in _tips!) _row(Icons.lightbulb_outline, tip),
+              const SizedBox(height: 8),
+              const Text(
+                'Это общие советы, не медицинская рекомендация.',
+                style: TextStyle(fontSize: 12, color: AppColors.fogGray),
+              ),
+            ] else if (_failed)
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Не удалось получить советы. Проверьте интернет.',
+                      style: TextStyle(fontSize: 14, color: AppColors.fogGray),
+                    ),
+                  ),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
