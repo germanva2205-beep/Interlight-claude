@@ -236,8 +236,8 @@ class UserSettings {
   int get baseLimit =>
       calorieLimit > 0 ? max(calorieLimit, minLimit) : calorieTarget;
 
-  /// Лимит на сегодня с учётом бонуса за шаги.
-  int get effectiveLimit => baseLimit + (bonusClaimed ? kBonusKcal : 0);
+  /// Лимит на сегодня: норма плюс активность (шаги и разминка).
+  int get effectiveLimit => dynamicLimit;
 
   /// Шагов для бонуса: личная норма плюс 2000.
   int get bonusSteps => stepsGoal + 2000;
@@ -1795,6 +1795,37 @@ class CalorieLimitFields extends StatelessWidget {
             unit: 'ккал',
             onChanged: (v) => c.update((s) => s.calorieLimit = (v / 50).round() * 50),
           ),
+          Builder(builder: (_) {
+            final diff = c.s.baseLimit - c.s.calorieTarget;
+            final far = diff.abs() > 300;
+            return Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.peach,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Рекомендация: ${c.s.calorieTarget} ккал',
+                    style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.darkGraphite),
+                  ),
+                  if (diff != 0)
+                    Text(
+                      diff < 0
+                          ? 'Вы выбрали на ${-diff} ккал меньше нормы'
+                          : 'Вы выбрали на $diff ккал больше нормы',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: diff > 0 && far ? const Color(0xFFE59A7A) : AppColors.fogGray,
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }),
           if (c.s.calorieLimit > 0)
             TextButton(
               onPressed: () => c.update((s) => s.calorieLimit = 0),
@@ -1859,9 +1890,11 @@ class MealKcalCard extends StatelessWidget {
         final s = c.s;
         final limit = s.effectiveLimit;
         final eaten = s.eatenKcal;
-        final left = limit - eaten;
-        final over = left < 0;
-        final barColor = over ? const Color(0xFFE59A7A) : AppColors.mint;
+        final base = s.baseLimit;
+        final burned = s.activityBurned;
+        final net = s.netBalance;
+        final over = net > 0;
+        final barColor = eaten > base ? const Color(0xFFE59A7A) : AppColors.mint;
 
         // Два приёма пищи в окне питания (интервальное голодание, например 16:8):
         // обед крупнее ужина; БЖУ по доле калорий: белки 25%, жиры 30%, углеводы 45%.
@@ -1928,7 +1961,7 @@ class MealKcalCard extends StatelessWidget {
                   Icon(Icons.local_fire_department_outlined, color: AppColors.mint, size: 24),
                   SizedBox(width: 8),
                   Text(
-                    'Калории сегодня',
+                    'Баланс дня',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -1938,32 +1971,44 @@ class MealKcalCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 12),
+              Text(
+                over ? 'Профицит: +$net ккал' : 'Дефицит: $net ккал 🔥',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: over ? const Color(0xFFE59A7A) : AppColors.mint,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Цель: $base · Съедено: $eaten · Сожжено: $burned',
+                style: const TextStyle(fontSize: 14, color: AppColors.fogGray),
+              ),
+              const SizedBox(height: 10),
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: LinearProgressIndicator(
-                  value: (eaten / limit).clamp(0.0, 1.0),
+                  value: (eaten / base).clamp(0.0, 1.0),
                   minHeight: 12,
                   backgroundColor: Colors.grey[200],
                   valueColor: AlwaysStoppedAnimation<Color>(barColor),
                 ),
               ),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '$eaten / $limit ккал',
-                    style: const TextStyle(fontSize: 14, color: AppColors.fogGray),
-                  ),
-                  Text(
-                    over ? 'Выше лимита на ${-left}' : 'Осталось: $left',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.darkGraphite,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 8),
+              Text(
+                '🔥 Активность: −$burned ккал',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.darkGraphite,
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  '💡 Активность увеличивает ваш лимит. Можно есть больше, оставаясь в дефиците!',
+                  style: TextStyle(fontSize: 12, color: AppColors.fogGray),
+                ),
               ),
               const SizedBox(height: 6),
               mealRow('Обед', s.lunchKcal, true),
@@ -1984,37 +2029,7 @@ class MealKcalCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (s.bonusClaimed)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Бонус за шаги +$kBonusKcal ккал уже добавлен к лимиту 🍫',
-                    style: const TextStyle(fontSize: 13, color: AppColors.fogGray),
-                  ),
-                )
-              else if (s.stepsToday >= s.bonusSteps)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Вы прошли норму и ещё 2000 шагов. Можно позволить себе '
-                        'небольшой десерт до $kBonusKcal ккал без чувства вины.',
-                        style: const TextStyle(fontSize: 13, color: AppColors.darkGraphite),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.tonal(
-                          onPressed: () => c.update((x) => x.bonusClaimed = true),
-                          child: Text('Забрать бонус: +$kBonusKcal ккал 🍫'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              if (over)
+              if (eaten > limit)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text(
