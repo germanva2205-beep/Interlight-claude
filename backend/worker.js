@@ -2,7 +2,8 @@
 // Ключ хранится только здесь, в секрете GEMINI_API_KEY, и в приложение не попадает.
 // Маршруты: POST /recipes, /insight, /plate.
 
-const MODEL = 'gemini-flash-latest';
+// Вторая модель быстрее: к ней переходим, если первая не ответила за 18 секунд.
+const MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
 
 function reply(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -11,9 +12,9 @@ function reply(obj, status = 200) {
   });
 }
 
-async function gemini(env, parts) {
+async function callModel(env, model, parts) {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
@@ -21,16 +22,30 @@ async function gemini(env, parts) {
         contents: [{ parts }],
         generationConfig: { responseMimeType: 'application/json' },
       }),
+      signal: AbortSignal.timeout(18000),
     },
   );
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 300);
-    throw new Error(`Gemini ${res.status}: ${detail}`);
+    throw new Error(`Gemini ${model} ${res.status}: ${detail}`);
   }
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-  if (!text) throw new Error('empty');
+  if (!text) throw new Error(`Gemini ${model}: empty`);
   return JSON.parse(text);
+}
+
+async function gemini(env, parts) {
+  let last;
+  for (const model of MODELS) {
+    try {
+      return await callModel(env, model, parts);
+    } catch (e) {
+      last = e;
+      console.error(String(e?.message ?? e));
+    }
+  }
+  throw last;
 }
 
 const img = (b64) => ({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
