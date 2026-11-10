@@ -2,8 +2,13 @@
 // Ключ хранится только здесь, в секрете GEMINI_API_KEY, и в приложение не попадает.
 // Маршруты: POST /recipes, /insight, /plate.
 
-// Вторая модель быстрее: к ней переходим, если первая не ответила за 18 секунд.
-const MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+// При перегрузке или таймауте (14 с) переходим к следующей модели.
+const MODELS = [
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+];
 
 function reply(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -22,7 +27,7 @@ async function callModel(env, model, parts) {
         contents: [{ parts }],
         generationConfig: { responseMimeType: 'application/json' },
       }),
-      signal: AbortSignal.timeout(18000),
+      signal: AbortSignal.timeout(14000),
     },
   );
   if (!res.ok) {
