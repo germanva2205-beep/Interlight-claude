@@ -67,6 +67,7 @@ if not manifest_path.exists():
 x = manifest_path.read_text(encoding="utf-8")
 
 permissions = [
+    "android.permission.INTERNET",
     "android.permission.CAMERA",
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.RECEIVE_BOOT_COMPLETED",
