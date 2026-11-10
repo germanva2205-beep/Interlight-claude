@@ -141,6 +141,7 @@ class UserSettings {
   bool vitaminsOn = true;
   bool warmupOn = true;
   bool checkinOn = true;
+  bool mealAlertOn = true; // яркое оповещение о начале окна питания
   bool stepsConnected = false; // шаги берутся из Apple Health / Health Connect
   bool aiPhotoOn = false; // можно ли отправлять фото на анализ ИИ
   bool plateAiConsent = false; // согласие на отправку фото блюд в ИИ
@@ -378,6 +379,7 @@ class SettingsController extends ChangeNotifier {
     s.vitaminsOn = _prefs.getBool('vitaminsOn') ?? d.vitaminsOn;
     s.warmupOn = _prefs.getBool('warmupOn') ?? d.warmupOn;
     s.checkinOn = _prefs.getBool('checkinOn') ?? d.checkinOn;
+    s.mealAlertOn = _prefs.getBool('mealAlertOn') ?? d.mealAlertOn;
     s.stepsConnected = _prefs.getBool('stepsConnected') ?? d.stepsConnected;
     s.aiPhotoOn = _prefs.getBool('aiPhotoOn') ?? d.aiPhotoOn;
     s.plateAiConsent = _prefs.getBool('plateAiConsent') ?? d.plateAiConsent;
@@ -472,6 +474,7 @@ class SettingsController extends ChangeNotifier {
     await _prefs.setBool('vitaminsOn', s.vitaminsOn);
     await _prefs.setBool('warmupOn', s.warmupOn);
     await _prefs.setBool('checkinOn', s.checkinOn);
+    await _prefs.setBool('mealAlertOn', s.mealAlertOn);
     await _prefs.setBool('stepsConnected', s.stepsConnected);
     await _prefs.setBool('aiPhotoOn', s.aiPhotoOn);
     await _prefs.setBool('plateAiConsent', s.plateAiConsent);
@@ -2100,6 +2103,23 @@ class NotificationService {
     iOS: DarwinNotificationDetails(),
   );
 
+  // Яркий канал: максимальная важность, цвет и вибрация, чтобы окно питания не пропустить.
+  static const NotificationDetails _mealDetails = NotificationDetails(
+    android: AndroidNotificationDetails(
+      'meal_window',
+      'Окно питания',
+      channelDescription: 'Оповещение о начале обеда и ужина',
+      importance: Importance.max,
+      priority: Priority.max,
+      color: Color(0xFFFF8A3D),
+      colorized: true,
+      enableVibration: true,
+      category: AndroidNotificationCategory.reminder,
+      styleInformation: BigTextStyleInformation(''),
+    ),
+    iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
+  );
+
   Future<void> init() async {
     try {
       tzdata.initializeTimeZones();
@@ -2171,6 +2191,18 @@ class NotificationService {
     );
   }
 
+  Future<void> _mealWindow(int id, int minutes, String title, String body) {
+    return _plugin.zonedSchedule(
+      id,
+      title,
+      body,
+      _next(minutes),
+      _mealDetails,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+  }
+
   Future<void> _weekly(int id, int minutes, int weekday, String title, String body) {
     return _plugin.zonedSchedule(
       id,
@@ -2204,6 +2236,8 @@ class NotificationService {
       s.vitaminsOn,
       s.warmupOn,
       s.checkinOn,
+      s.mealAlertOn,
+      s.dinnerMin,
       s.quietOn,
       s.quietStartMin,
       s.quietEndMin,
@@ -2220,7 +2254,7 @@ class NotificationService {
       await _plugin.cancelAll();
       if (!s.onboardingDone) return;
 
-      final any = s.waterOn || s.vitaminsOn || s.warmupOn || s.checkinOn;
+      final any = s.waterOn || s.vitaminsOn || s.warmupOn || s.checkinOn || s.mealAlertOn;
       if (any && !_permissionAsked) await requestPermission();
 
       if (s.waterOn) {
@@ -2248,6 +2282,16 @@ class NotificationService {
       if (s.warmupOn && !s.isQuiet(15 * 60)) {
         await _daily(300, 15 * 60, 'Микро-разминка на 5 минут',
             'Встаньте, потянитесь, пройдитесь по комнате.');
+      }
+      if (s.mealAlertOn) {
+        if (!s.isQuiet(s.lunchMin)) {
+          await _mealWindow(500, s.lunchMin, '🍽️ Окно питания открыто!',
+              'Пора на обед. Приятного аппетита, вы это заслужили!');
+        }
+        if (!s.isQuiet(s.dinnerMin)) {
+          await _mealWindow(501, s.dinnerMin, '🍽️ Окно питания открыто!',
+              'Время ужина. Ешьте спокойно и с удовольствием!');
+        }
       }
       if (s.checkinOn) {
         final m = s.isQuiet(9 * 60) ? s.quietEndMin : 9 * 60;
@@ -4640,6 +4684,13 @@ class SettingsPage extends StatelessWidget {
                   title: const Text('Микро-разминки'),
                   value: c.s.warmupOn,
                   onChanged: (v) => c.update((s) => s.warmupOn = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: AppColors.mint,
+                  title: const Text('Яркое оповещение об окне питания'),
+                  value: c.s.mealAlertOn,
+                  onChanged: (v) => c.update((s) => s.mealAlertOn = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
