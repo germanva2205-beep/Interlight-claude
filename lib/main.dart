@@ -1322,7 +1322,7 @@ class InsightService {
     final recent = list.length > 12 ? list.sublist(list.length - 12) : list;
     final body = <String, dynamic>{
       'checkIns': [
-        for (final e in recent) {'date': e.date.toIso8601String(), 'weightG': e.weightG},
+        for (final e in recent) {'date': e.date.toIso8601String(), 'weightKg': e.weightG / 1000},
       ],
     };
     if (withPhotos && list.length >= 2) {
@@ -2562,7 +2562,7 @@ class _ProgressPageState extends State<ProgressPage> {
                     const Padding(
                       padding: EdgeInsets.only(top: 8),
                       child: Text(
-                        'Это мягкая подсказка по вашим данным, а не оценка здоровья или внешности.',
+                        'Это дружеская подсказка по вашим данным, а не оценка здоровья или внешности.',
                         style: TextStyle(fontSize: 12, color: AppColors.fogGray),
                       ),
                     ),
@@ -3805,7 +3805,7 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
                   children: [
                     // 0. Приветствие и важная информация
                     _scroll([
-                      _heading('InterLight', 'Твой мягкий вход в здоровый ритм.'),
+                      _heading('InterLight', 'Твой спокойный вход в здоровый ритм.'),
                       const SectionCard(
                         title: 'Прежде чем начать',
                         child: Text(
@@ -4781,7 +4781,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => WhatCanIDoSheet(status: status, settings: widget.controller.s),
+      builder: (context) => WhatCanIDoSheet(status: status),
     );
   }
 
@@ -4906,71 +4906,83 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-// ───────────────────────── «Что можно сейчас?» + советы ИИ ─────────────────────────
+// ───────────────────────── «Что можно сейчас?» — советы ───────────────────────
 
-const String kFastingTipsApiUrl = kAiBaseUrl == '' ? '' : '$kAiBaseUrl/fasting-tips';
-
-class FastingTipsService {
-  static Future<List<String>> fetch(FastingStatus status, UserSettings s) async {
-    if (kFastingTipsApiUrl.isEmpty) throw Exception('no server');
-    final res = await http
-        .post(
-          Uri.parse(kFastingTipsApiUrl),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'eating': status.isEatingWindow,
-            'minutesLeft': status.remaining.inMinutes,
-            'nextMeal': status.nextMeal.genitive == 'ужина' ? 'ужин' : 'обед',
-            'lunch': _hhmm(s.lunchMin),
-            'dinner': _hhmm(s.dinnerMin),
-            'health': kHealthLabels[s.healthLimit.clamp(0, kHealthLabels.length - 1).toInt()],
-          }),
-        )
-        .timeout(const Duration(seconds: 45));
-    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
-    final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-    final tips = [
-      for (final x in (data['tips'] as List? ?? const []))
-        if (x.toString().trim().isNotEmpty) x.toString().trim(),
-    ];
-    if (tips.isEmpty) throw Exception('empty');
-    return tips;
-  }
+class FastingTip {
+  final int period; // 0 утро, 1 день, 2 вечер, 3 ночь, -1 окно питания
+  final String text;
+  const FastingTip(this.period, this.text);
 }
 
-class WhatCanIDoSheet extends StatefulWidget {
+const List<FastingTip> kFastingTips = [
+  FastingTip(0, 'Стакан тёплой воды после пробуждения помогает проснуться и снижает желание перекусить.'),
+  FastingTip(0, 'Чёрный кофе или несладкий чай подойдут утром. Пейте не больше 2–3 чашек.'),
+  FastingTip(0, 'Если хочется есть, сначала выпейте воды: жажду часто принимают за голод.'),
+  FastingTip(0, 'Лёгкая утренняя прогулка отвлекает от мыслей о еде и добавляет шаги.'),
+  FastingTip(1, 'Зелёный или травяной чай без сахара и мёда не нарушает интервал.'),
+  FastingTip(1, 'Голод приходит волнами и обычно проходит за 15–20 минут. Займитесь делом, и волна схлынет.'),
+  FastingTip(1, 'Молоко, сливки и сироп в кофе, соки и сладкие напитки оставьте на время еды.'),
+  FastingTip(1, 'Вода с долькой лимона освежает. Сок выжимайте по капле, без сахара.'),
+  FastingTip(1, 'Газированная вода без сахара и добавок тоже подойдёт, если хочется разнообразия.'),
+  FastingTip(2, 'Перед ужином выпейте стакан воды: так легче не переесть.'),
+  FastingTip(2, 'Займите руки и голову: короткая разминка, душ или звонок близким помогут дождаться ужина.'),
+  FastingTip(2, 'Жвачка и леденцы с сахаром разжигают аппетит. Лучше без них.'),
+  FastingTip(2, 'Продумайте ужин заранее: белок, овощи и немного сложных углеводов.'),
+  FastingTip(3, 'Тёплый несладкий травяной чай (ромашка, мята) успокаивает перед сном.'),
+  FastingTip(3, 'Не пейте кофе поздно вечером: сон важнее. Недосып усиливает чувство голода.'),
+  FastingTip(3, 'Перед сном пейте воду небольшими глотками, чтобы не просыпаться ночью.'),
+  FastingTip(-1, 'Начните приём пищи с белка и овощей: насыщение придёт быстрее.'),
+  FastingTip(-1, 'Ешьте медленно, 15–20 минут: сигнал сытости приходит не сразу.'),
+  FastingTip(-1, 'Запивайте еду водой или чаем, сладкие напитки лучше не добавлять.'),
+  FastingTip(-1, 'Не наедайтесь впрок: порция должна быть обычной, а не «за весь день».'),
+  FastingTip(0, 'Не спешите с завтраком из привычки: сначала прислушайтесь, голод это или просто режим.'),
+  FastingTip(0, 'Утренний свет помогает проснуться: подойдите к окну или выйдите на балкон на пару минут.'),
+  FastingTip(0, 'Несладкий чай с имбирём бодрит и согревает без калорий.'),
+  FastingTip(0, 'Запланируйте на утро короткую зарядку: она отвлекает от мыслей о еде.'),
+  FastingTip(0, 'Взвешиваться лучше утром и натощак: так цифры сравнимы между неделями.'),
+  FastingTip(1, 'Если голод сильный, попробуйте выпить стакан воды и подождать 10 минут.'),
+  FastingTip(1, 'Не сидите рядом с едой: уберите печенье и конфеты с глаз, и соблазна станет меньше.'),
+  FastingTip(1, 'Прогулка после обеда помогает пищеварению и добавляет шаги.'),
+  FastingTip(1, 'Чёрный кофе без сахара можно, но не на пустой нервный желудок и не больше 3 чашек в день.'),
+  FastingTip(1, 'Вода с мятой или огурцом освежает и не содержит калорий.'),
+  FastingTip(2, 'Если до ужина осталось немного, сделайте перерыв: подышите, потянитесь, пройдитесь.'),
+  FastingTip(2, 'Приготовьте ужин заранее: так вы не станете перекусывать «чем попало».'),
+  FastingTip(2, 'Не садитесь за ужин слишком голодным: сначала стакан воды, потом спокойная еда.'),
+  FastingTip(2, 'Чистка зубов помогает «закрыть кухню» и снижает тягу к перекусам.'),
+  FastingTip(2, 'Выберите на ужин белок и овощи: они дольше сохраняют сытость.'),
+  FastingTip(3, 'Приглушите свет за час до сна: так легче заснуть и меньше тянет на еду.'),
+  FastingTip(3, 'Тяга к еде вечером часто связана с усталостью. Лучше лечь пораньше.'),
+  FastingTip(3, 'Уберите телефон перед сном: ночные ленты вызывают желание перекусить.'),
+  FastingTip(3, 'Проветрите комнату перед сном: прохлада и свежий воздух улучшают сон.'),
+  FastingTip(-1, 'Добавьте к тарелке овощи или зелень: объём еды растёт, а калорий немного.'),
+  FastingTip(-1, 'Не отвлекайтесь на телефон и ТВ во время еды: вы заметите сытость вовремя.'),
+  FastingTip(-1, 'Ешьте белок на обед и ужин: он помогает дольше не чувствовать голода.'),
+  FastingTip(-1, 'После еды пройдитесь 10–15 минут: это полезно для самочувствия.'),
+  FastingTip(-1, 'Не ругайте себя за «лишний» кусочек: возвращайтесь к режиму со следующего приёма.'),
+];
+
+/// Советы, подходящие ко времени суток; набор меняется каждые 2 часа и по дням.
+List<String> tipsFor(DateTime now, bool eating) {
+  final period = eating
+      ? -1
+      : now.hour >= 5 && now.hour < 11
+          ? 0
+          : now.hour >= 11 && now.hour < 17
+              ? 1
+              : now.hour >= 17 && now.hour < 23
+                  ? 2
+                  : 3;
+  final pool = kFastingTips.where((x) => x.period == period).toList();
+  final day = now.difference(DateTime(now.year)).inDays;
+  final start = (day * 2 + now.hour ~/ 2) % pool.length;
+  return [
+    for (var i = 0; i < min(3, pool.length); i++) pool[(start + i) % pool.length].text,
+  ];
+}
+
+class WhatCanIDoSheet extends StatelessWidget {
   final FastingStatus status;
-  final UserSettings settings;
-  const WhatCanIDoSheet({super.key, required this.status, required this.settings});
-
-  @override
-  State<WhatCanIDoSheet> createState() => _WhatCanIDoSheetState();
-}
-
-class _WhatCanIDoSheetState extends State<WhatCanIDoSheet> {
-  List<String>? _tips;
-  bool _loading = false;
-  bool _failed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _failed = false;
-    });
-    try {
-      final tips = await FastingTipsService.fetch(widget.status, widget.settings);
-      if (mounted) setState(() => _tips = tips);
-    } catch (_) {
-      if (mounted) setState(() => _failed = true);
-    }
-    if (mounted) setState(() => _loading = false);
-  }
+  const WhatCanIDoSheet({super.key, required this.status});
 
   Widget _row(IconData icon, String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -4991,9 +5003,7 @@ class _WhatCanIDoSheetState extends State<WhatCanIDoSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final status = widget.status;
     final canEat = status.isEatingWindow;
-    final title = canEat ? 'Сейчас окно питания' : 'Сейчас интервал';
     final items = canEat
         ? const [
             'Полноценный приём пищи 🍽️',
@@ -5013,9 +5023,9 @@ class _WhatCanIDoSheetState extends State<WhatCanIDoSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
+            const Text(
+              'Советы',
+              style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
                 color: AppColors.darkGraphite,
@@ -5024,52 +5034,19 @@ class _WhatCanIDoSheetState extends State<WhatCanIDoSheet> {
             const SizedBox(height: 4),
             Text(
               canEat
-                  ? 'Следующий интервал начнётся примерно через 45 минут после еды.'
+                  ? 'Сейчас окно питания. Следующее ограничение начнётся примерно через 45 минут после еды.'
                   : 'До ${status.nextMeal.genitive}: ${formatDuration(status.remaining)}',
               style: const TextStyle(fontSize: 14, color: AppColors.fogGray),
             ),
             const SizedBox(height: 16),
             for (final item in items) _row(Icons.check_circle, item),
             const Divider(height: 32),
-            const Row(
-              children: [
-                Icon(Icons.auto_awesome, color: AppColors.mint, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Советы ИИ',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.darkGraphite,
-                  ),
-                ),
-              ],
-            ),
+            for (final tip in tipsFor(DateTime.now(), canEat)) _row(Icons.lightbulb_outline, tip),
             const SizedBox(height: 8),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Center(child: CircularProgressIndicator(color: AppColors.mint)),
-              )
-            else if (_tips != null) ...[
-              for (final tip in _tips!) _row(Icons.lightbulb_outline, tip),
-              const SizedBox(height: 8),
-              const Text(
-                'Это общие советы, не медицинская рекомендация.',
-                style: TextStyle(fontSize: 12, color: AppColors.fogGray),
-              ),
-            ] else if (_failed)
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Не удалось получить советы. Проверьте интернет.',
-                      style: TextStyle(fontSize: 14, color: AppColors.fogGray),
-                    ),
-                  ),
-                  TextButton(onPressed: _load, child: const Text('Повторить')),
-                ],
-              ),
+            const Text(
+              'Это общие советы, не медицинская рекомендация.',
+              style: TextStyle(fontSize: 12, color: AppColors.fogGray),
+            ),
           ],
         ),
       ),
