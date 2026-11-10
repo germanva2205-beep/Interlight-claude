@@ -2208,6 +2208,10 @@ class NotificationService {
       s.quietStartMin,
       s.quietEndMin,
       s.lunchMin,
+      s.waterGoalMl,
+      s.waterGlassMl,
+      s.waterCooldownMin,
+      s.intakeSlots.map((x) => '${x.minute}:${x.label}').join(','),
     ].join('|');
     if (sig == _signature) return;
     _signature = sig;
@@ -2220,19 +2224,25 @@ class NotificationService {
       if (any && !_permissionAsked) await requestPermission();
 
       if (s.waterOn) {
-        // 8:00, 10:00 … 22:00 — не чаще раза в 2 часа, кроме тихих часов.
-        for (var i = 0; i < 8; i++) {
-          final m = (8 + i * 2) * 60;
+        // Порций столько, сколько нужно для цели; шаг не меньше паузы между порциями.
+        final from = s.quietOn ? s.quietEndMin : 8 * 60;
+        final to = s.quietOn && s.quietStartMin > from ? s.quietStartMin : 22 * 60;
+        final glasses = (s.waterGoalMl / max(1, s.waterGlassMl)).ceil().clamp(1, 16).toInt();
+        final step = max(s.waterCooldownMin, ((to - from) / glasses).floor());
+        for (var i = 0; i < glasses; i++) {
+          final m = from + i * step;
+          if (m >= to) break;
           if (s.isQuiet(m)) continue;
-          await _daily(100 + i, m, 'Время для стакана воды 💧', 'Небольшая забота о себе.');
+          await _daily(100 + i, m, 'Время для воды 💧',
+              'Выпейте ${s.waterGlassMl} мл. Небольшая забота о себе.');
         }
       }
       if (s.vitaminsOn) {
-        final times = [8 * 60 + 30, s.lunchMin];
-        for (var i = 0; i < times.length; i++) {
-          if (s.isQuiet(times[i])) continue;
-          await _daily(200 + i, times[i], 'Напоминание о витаминах',
-              'Если вы их принимаете, самое время.');
+        // По одному напоминанию на каждый приём из списка пользователя.
+        for (var i = 0; i < s.intakeSlots.length && i < 50; i++) {
+          final slot = s.intakeSlots[i];
+          if (s.isQuiet(slot.minute)) continue;
+          await _daily(200 + i, slot.minute, 'Пора: ${slot.label}', 'Отметьте приём в приложении.');
         }
       }
       if (s.warmupOn && !s.isQuiet(15 * 60)) {
@@ -4613,14 +4623,14 @@ class SettingsPage extends StatelessWidget {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   activeThumbColor: AppColors.mint,
-                  title: const Text('Вода (каждые 2 часа)'),
+                  title: const Text('Вода (по цели на день)'),
                   value: c.s.waterOn,
                   onChanged: (v) => c.update((s) => s.waterOn = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   activeThumbColor: AppColors.mint,
-                  title: const Text('Витамины'),
+                  title: const Text('Приёмы по списку'),
                   value: c.s.vitaminsOn,
                   onChanged: (v) => c.update((s) => s.vitaminsOn = v),
                 ),
@@ -4641,7 +4651,7 @@ class SettingsPage extends StatelessWidget {
                 const Padding(
                   padding: EdgeInsets.only(top: 4),
                   child: Text(
-                    'Вода: каждые 2 часа с 08:00 до 22:00. Витамины: утром и в обед. '
+                    'Вода: порциями до цели дня, с учётом паузы. Приёмы: в заданное вами время. '
                     'Разминка: днём. Чек-ап: воскресенье утром. В тихие часы уведомлений нет.',
                     style: TextStyle(fontSize: 12, color: AppColors.fogGray),
                   ),
